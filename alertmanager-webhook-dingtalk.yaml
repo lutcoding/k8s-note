@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dingtalk-conf
+  namespace: kube-mon
+data:
+  config.yaml: |
+    targets:
+      webhook1:
+        url: https://oapi.dingtalk.com/robot/send?access_token=69546780a4ecc6f2df41531547252a0cbe61944efd462dd8ff9cdf0461b98aae
+        secret: SEC540206088e4e95524aeff647c67a3289ee6f3511a510fde00daf3f1d8ec5bfb4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dingtalk
+  namespace: kube-mon
+  labels:
+    app: dingtalk
+spec:
+  selector:
+    matchLabels:
+      app: dingtalk
+  template:
+    metadata:
+      labels:
+        app: dingtalk
+    spec:
+      volumes:
+        - name: dingtalkcfg
+          configMap:
+            name: dingtalk-conf
+      containers:
+        - name: dingtalk
+          image: timonwong/prometheus-webhook-dingtalk:v2.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - '--config.file=/etc/dingtalk/config.yaml'
+            - '--web.enable-lifecycle'
+            - '--web.listen-address=:8060'
+          ports:
+            - containerPort: 8060
+          volumeMounts:
+            - mountPath: '/etc/dingtalk'
+              name: dingtalkcfg
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dingtalk
+  namespace: kube-mon
+  labels:
+    app: dingtalk
+spec:
+  selector:
+    app: dingtalk
+  ports:
+    - port: 8060

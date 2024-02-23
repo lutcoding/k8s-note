@@ -1,0 +1,220 @@
+# other.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-auth
+type: Opaque
+stringData:
+  username: admin
+  password: admin321 # argocd 的密码
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-secret
+type: Opaque
+stringData:
+  secretToken: '1234567'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-auth
+  annotations:
+    tekton.dev/git-0: http://git.k8s.local
+type: kubernetes.io/basic-auth
+stringData:
+  username: root
+  password: admin321
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-auth
+stringData: 
+  config.json: |
+    {
+      "auths":{
+          "https://index.docker.io/v1/":{
+              "auth":"bHV0YW8yMDAwMDEwN0BnbWFpbC5jb206cXExNTYxNTZxcQ=="
+          }
+        }
+    }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tekton-build-sa
+secrets:
+  - name: gitlab-auth
+  - name: gitlab-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-clusterrole-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: tekton-build-sa
+    namespace: default
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: go-repo-pvc
+spec:
+  resources:
+    requests:
+      storage: 1Gi
+  volumeMode: Filesystem
+  storageClassName: local-storage
+  accessModes:
+    - ReadWriteOnce
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: go-repo-pv
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  storageClassName: local-storage
+  local:
+    path: /data/k8s/tekton
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k8s-node1
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekton-triggers-gitlab-minimal
+rules:
+  # EventListeners need to be able to fetch all namespaced resources
+  - apiGroups: ['triggers.tekton.dev']
+    resources:
+      ['eventlisteners', 'triggerbindings', 'triggertemplates', 'triggers','interceptors']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    # configmaps is needed for updating logging config
+    resources: ['configmaps']
+    verbs: ['get', 'list', 'watch']
+  # Permissions to create resources in associated TriggerTemplates
+  - apiGroups: ['tekton.dev']
+    resources: ['pipelineruns', 'pipelineresources', 'taskruns']
+    verbs: ['create']
+  - apiGroups: ['']
+    resources: ['serviceaccounts']
+    verbs: ['impersonate']
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    resourceNames: ['tekton-triggers']
+    verbs: ['use']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-gitlab-binding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-build-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-triggers-gitlab-minimal
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: tekton-triggers-gitlab-clusterrole
+rules:
+  # EventListeners need to be able to fetch any clustertriggerbindings
+  - apiGroups: ['triggers.tekton.dev']
+    resources: ['clustertriggerbindings', 'clusterinterceptors']
+    verbs: ['get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-gitlab-clusterbinding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-build-sa
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-gitlab-clusterrole
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekton-triggers-gitlab-minimal
+rules:
+  # EventListeners need to be able to fetch all namespaced resources
+  - apiGroups: ['triggers.tekton.dev']
+    resources:
+      ['eventlisteners', 'triggerbindings', 'triggertemplates', 'triggers','interceptors']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    # configmaps is needed for updating logging config
+    resources: ['configmaps']
+    verbs: ['get', 'list', 'watch']
+  # Permissions to create resources in associated TriggerTemplates
+  - apiGroups: ['tekton.dev']
+    resources: ['pipelineruns', 'pipelineresources', 'taskruns']
+    verbs: ['create']
+  - apiGroups: ['']
+    resources: ['serviceaccounts']
+    verbs: ['impersonate']
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    resourceNames: ['tekton-triggers']
+    verbs: ['use']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-gitlab-binding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-build-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-triggers-gitlab-minimal
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: tekton-triggers-gitlab-clusterrole
+rules:
+  # EventListeners need to be able to fetch any clustertriggerbindings
+  - apiGroups: ['triggers.tekton.dev']
+    resources: ['clustertriggerbindings', 'clusterinterceptors']
+    verbs: ['get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-gitlab-clusterbinding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-build-sa
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-gitlab-clusterrole

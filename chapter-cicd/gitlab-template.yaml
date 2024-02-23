@@ -1,0 +1,40 @@
+# gitlab-template.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: gitlab-template
+spec:
+  params: # 定义参数，和 TriggerBinding 中的保持一致
+    - name: gitrevision
+    - name: gitrepositoryurl
+  resourcetemplates: # 定义资源模板
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun # 定义 pipeline 模板
+      metadata:
+        generateName: gitlab-run- # TaskRun 名称前缀
+      spec:
+        serviceAccountName: tekton-build-sa
+        pipelineRef:
+          name: pipeline
+        workspaces:
+          - name: go-repo-pvc
+            persistentVolumeClaim:
+              claimName: go-repo-pvc
+          - name: dockerconfig-sec
+            secret:
+              secretName: docker-auth
+        params:
+          - name: git_url
+            value: $(tt.params.gitrepositoryurl)
+          - name: git_infra_url
+            value: git.k8s.local/course/devops-demo-deploy.git
+          - name: image
+            value: 'cnlut/devops-demo:$(tt.params.gitrevision)'
+          - name: image_tag
+            value: '$(tt.params.gitrevision)'
+          - name: argocd_url
+            value: argocd.k8s.local
+          - name: argocd_secret
+            value: argocd-auth
+          - name: app_name
+            value: devops-demo

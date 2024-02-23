@@ -1,0 +1,34 @@
+# pipelinerun.yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: pipelinerun
+spec:
+  serviceAccountName: tekton-build-sa
+  pipelineRef:
+    name: pipeline
+  podTemplate:
+    securityContext:
+      fsGroup: 65532
+  workspaces:
+    - name: go-repo-pvc
+      persistentVolumeClaim:
+        claimName: go-repo-pvc
+    - name: dockerconfig-sec
+      secret:
+        secretName: docker-auth
+  params:
+    - name: git_url
+      value: http://git.k8s.local/course/devops-demo.git
+    - name: image
+      value: 'cnlut/devops-demo:v0.1.0'
+    - name: charts_dir
+      value: './helm'
+    - name: release_name
+      value: devops-demo
+    - name: release_namespace
+      value: 'kube-ops'
+    - name: overwrite_values
+      value: 'image.repository=cnlut/devops-demo,image.tag=v0.1.0'
+    - name: values_file
+      value: 'my-values.yaml'

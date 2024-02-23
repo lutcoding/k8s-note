@@ -1,0 +1,261 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: kube-mon
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      scrape_timeout: 15s
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['alertmanager:9093']
+    rule_files:
+    - /etc/prometheus/rules.yml            
+    scrape_configs:
+    - job_name: 'prometheus'
+      static_configs:
+      - targets: ['localhost:9090']
+    - job_name: 'coredns'
+      static_configs:
+        - targets: ['kube-dns.kube-system.svc.cluster.local:9153']
+    - job_name: 'nodes'
+      kubernetes_sd_configs:
+        - role: node
+      relabel_configs:
+        - source_labels: ['__address__']
+          regex: '(.*):10250'
+          replacement: '$1:9100'
+          target_label: '__address__'
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+    - job_name: 'kubelet'
+      kubernetes_sd_configs:
+        - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+    - job_name: 'kubernetes-cadvisor'
+      kubernetes_sd_configs:
+        - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+        - source_labels: [__meta_kubernetes_node_name]
+          replacement: /metrics/cadvisor
+          target_label: __metrics_path__
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+        - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - source_labels:
+            [
+              __meta_kubernetes_namespace,
+              __meta_kubernetes_service_name,
+              __meta_kubernetes_endpoint_port_name,
+            ]
+          action: keep
+          regex: default;kubernetes;https
+  rules.yml: |
+    groups:
+    - name: test-node-mem
+      rules:
+      - alert: NodeMemoryUsage
+        expr: (node_memory_MemTotal_bytes - (node_memory_MemFree_bytes + node_memory_Buffers_bytes + node_memory_Cached_bytes)) / node_memory_MemTotal_bytes * 100 > 20
+        for: 2m
+        labels:
+          team: node
+        annotations:
+          summary: "{{$labels.instance}}: High Memory usage detected"
+          description: "{{$labels.instance}}: Memory usage is above 20% (current value is: {{ $value }}"          
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: kube-mon
+  labels:
+    app: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command: [chown, -R, "nobody:nobody", /prometheus]
+          volumeMounts:
+            - name: data
+              mountPath: /prometheus
+      containers:
+        - image: prom/prometheus:v2.48.0
+          name: prometheus
+          args:
+            - '--config.file=/etc/prometheus/prometheus.yml'
+            - '--storage.tsdb.path=/prometheus' # 指定tsdb数据路径
+            - '--storage.tsdb.retention.time=24h'
+            - '--web.enable-admin-api' # 控制对admin HTTP API的访问，其中包括删除时间序列等功能
+            - '--web.enable-lifecycle' # 支持热更新，直接执行localhost:9090/-/reload立即生效
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - mountPath: '/etc/prometheus'
+              name: config-volume
+            - mountPath: '/prometheus'
+              name: data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1024Mi
+            limits:
+              cpu: 200m
+              memory: 1024Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+        - configMap:
+            name: prometheus-config
+          name: config-volume
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-local
+  labels:
+    app: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 10Gi
+  storageClassName: local-storage
+  local:
+    path: /data/k8s/prometheus
+  persistentVolumeReclaimPolicy: Retain
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k8s-node2
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: kube-mon
+spec:
+  selector:
+    matchLabels:
+      app: prometheus
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-storage
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: kube-mon
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - nodes
+      - services
+      - endpoints
+      - pods
+      - nodes/proxy
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - 'extensions'
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - configmaps
+      - nodes/metrics
+    verbs:
+      - get
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: kube-mon
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: kube-mon
+  labels:
+    app: prometheus
+spec:
+  selector:
+    app: prometheus
+  type: LoadBalancer
+  ports:
+    - name: web
+      port: 9090
+      targetPort: http

@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-auth
+  annotations:
+    tekton.dev/docker-0: https://index.docker.io/v1/
+type: kubernetes.io/basic-auth
+stringData:
+  username: lutao20000107@gmail.com
+  password: qq156156qq
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-auth
+  annotations:
+    tekton.dev/git-0: http://git.k8s.local
+type: kubernetes.io/basic-auth
+stringData:
+  username: root
+  password: admin321
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: build-sa
+secrets:
+  - name: docker-auth
+  - name: gitlab-auth
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-and-push
+spec:
+  resources:
+    inputs:
+      - name: repo
+        type: git
+  steps:
+    - name: build-and-push
+      image: cnych/kaniko-executor:v0.22.0
+      env:
+        - name: DOCKER_CONFIG
+          value: /tekton/home/.docker
+      command:
+        - /kaniko/executor
+        - --dockerfile=Dockerfile
+        - --context=/workspace/repo
+        - --destination=cnlut/tekton-test:latest
+---
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: build-and-push
+spec:
+  serviceAccountName: build-sa
+  taskRef:
+    name: build-and-push
+  resources:
+    inputs:
+      - name: repo
+        resourceRef:
+          name: cnych-tekton-example
+---
+apiVersion: tekton.dev/v1alpha1
+kind: PipelineResource
+metadata:
+  name: cnych-tekton-example
+spec:
+  type: git
+  params:
+    - name: url
+      value: https://github.com/cnych/tekton-demo
+    - name: revision
+      value: master

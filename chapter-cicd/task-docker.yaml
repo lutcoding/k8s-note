@@ -1,0 +1,25 @@
+# task-docker.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: docker
+spec:
+  workspaces:
+    - name: go-repo
+    - name: dockerconfig
+      optional: true
+      mountPath: /kaniko/.docker
+  params:
+    - name: image
+      description: Reference of the image docker will produce.
+  steps:
+    - name: docker-build
+      image: cnych/kaniko-executor:v0.22.0
+      workingDir: $(workspaces.go-repo.path)
+      command:
+        - /kaniko/executor
+        - --dockerfile=Dockerfile
+        - --context=$(workspaces.go-repo.path)
+        - --destination=$(params.image)
+      securityContext:
+        privileged: true

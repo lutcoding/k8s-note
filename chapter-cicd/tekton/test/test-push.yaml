@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-auth
+stringData: 
+  config.json: |
+    {
+      "auths":{
+          "https://index.docker.io/v1/":{
+              "auth":"bHV0YW8yMDAwMDEwN0BnbWFpbC5jb206cXExNTYxNTZxcQ=="
+          }
+        }
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-auth
+  annotations:
+    tekton.dev/git-0: http://git.k8s.local
+type: kubernetes.io/basic-auth
+stringData:
+  username: root
+  password: admin321
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: build-sa
+secrets:
+  - name: docker-auth
+  - name: gitlab-auth
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: go-repo-pvc
+spec:
+  resources:
+    requests:
+      storage: 1Gi
+  volumeMode: Filesystem
+  storageClassName: local-storage
+  accessModes:
+    - ReadWriteOnce
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: go-repo-pv
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  storageClassName: local-storage
+  local:
+    path: /data/k8s/tekton
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k8s-node1
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-and-push
+spec:
+  workspaces:
+    - name: go-repo
+    - name: dockerconfig
+      optional: true
+      mountPath: /kaniko/.docker
+  steps:
+    - name: build-and-push
+      image: cnych/kaniko-executor:v0.22.0
+      workingDir: $(workspaces.go-repo.path)
+      command:
+        - /kaniko/executor
+        - --dockerfile=Dockerfile
+        - --context=$(workspaces.go-repo.path)
+        - --destination=cnlut/tekton-test:latest
+---
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: build-and-push
+spec:
+  serviceAccountName: build-sa
+  taskRef:
+    name: build-and-push
+  workspaces:
+    - name: go-repo
+      persistentVolumeClaim:
+        claimName: go-repo-pvc
+    - name: dockerconfig
+      secret:
+        secretName: docker-auth
+  podTemplate:
+    securityContext:
+      fsGroup: 65532

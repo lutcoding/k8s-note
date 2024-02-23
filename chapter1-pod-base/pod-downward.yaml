@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-downward-demo1
+  namespace: default
+spec:
+  containers:
+    - name: pod-downward-demo1
+      image: busybox
+      command: ["/bin/sh", "-c", "env"]
+      resources:
+        limits:
+          cpu: 100m
+          memory: 200Mi
+        requests:
+          cpu: 50m
+          memory: 100Mi
+      env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_RESOURCE_CPU_LIMIT
+          valueFrom:
+            resourceFieldRef: 
+              resource: limits.cpu
+        - name: POD_RESOURCE_CPU_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              resource: requests.cpu

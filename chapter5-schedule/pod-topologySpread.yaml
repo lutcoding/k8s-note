@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: topo-demo
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: topo
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        app: topo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+          ports: 
+            - containerPort: 80
+              name: ngpt
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      topologySpreadConstraints:
+        - labelSelector:
+            matchLabels:
+              app: topo
+          maxSkew: 2
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
